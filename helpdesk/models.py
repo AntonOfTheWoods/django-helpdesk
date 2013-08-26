@@ -108,11 +108,11 @@ class Queue(models.Model):
     email_box_type = models.CharField(
         _('E-Mail Box Type'),
         max_length=5,
-        choices=(('pop3', _('POP 3')), ('imap', _('IMAP'))),
+        choices=(('pop3', _('POP 3')), ('imap', _('IMAP')), ('file', _('FILE'))),
         blank=True,
         null=True,
         help_text=_('E-Mail server type for creating tickets automatically '
-            'from a mailbox - both POP3 and IMAP are supported.'),
+            'from a mailbox - both POP3, IMAP and FILE are supported.'),
         )
 
     email_box_host = models.CharField(
@@ -166,6 +166,15 @@ class Queue(models.Model):
             'from? This allows you to use one IMAP account for multiple '
             'queues, by filtering messages on your IMAP server into separate '
             'folders. Default: INBOX.'),
+        )
+
+    email_box_file_glob = models.CharField(
+        _('Email File Glob'),
+        max_length=250,
+        blank=True,
+        null=True,
+        help_text=_('If using email files, what files do you want to process? '
+            'The file must be found with a normal "glob" and must be present in a subdirectory of the MEDIA_ROOT'),
         )
 
     email_box_interval = models.IntegerField(

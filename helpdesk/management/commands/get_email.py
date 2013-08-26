@@ -15,6 +15,8 @@ import imaplib
 import mimetypes
 import poplib
 import re
+import glob
+import os
 
 from datetime import timedelta
 from email.header import decode_header
@@ -26,6 +28,8 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils.translation import ugettext as _
 from helpdesk import settings
+from django.conf import settings as django_settings
+
 
 try:
     from django.utils import timezone
@@ -131,12 +135,24 @@ def process_queue(q, quiet=False):
                 ticket = ticket_from_message(message=data[0][1], queue=q, quiet=quiet)
                 if ticket:
                     server.store(num, '+FLAGS', '\\Deleted')
-        
+                    
         server.expunge()
         server.close()
         server.logout()
 
-
+    elif email_box_type == 'file':
+ #       try:
+            print os.path.normpath(django_settings.MEDIA_ROOT + '/' + q.email_box_file_glob.replace('../',''))
+            for message in glob.glob(os.path.normpath(django_settings.MEDIA_ROOT + '/' + q.email_box_file_glob.replace('../',''))):
+                with open (message, "r") as message_file:
+                    message_content=message_file.read()
+                    ticket = ticket_from_message(message=message_content, queue=q, quiet=quiet)
+                if ticket:
+                    os.rename(message, message + ".bak")
+#        except Exception as ex:
+            #pass # do something here
+#            print ex
+            
 def decodeUnknown(charset, string):
     if not charset:
         try:
@@ -273,10 +289,15 @@ def ticket_from_message(message, queue, quiet):
     if not quiet:
         print (" [%s-%s] %s" % (t.queue.slug, t.id, t.title,)).encode('ascii', 'replace')
 
+    print files
+
     for file in files:
+        print file
         if file['content']:
             filename = file['filename'].encode('ascii', 'replace').replace(' ', '_')
+            print filename
             filename = re.sub('[^a-zA-Z0-9._-]+', '', filename)
+            print filename
             a = Attachment(
                 followup=f,
                 filename=filename,
