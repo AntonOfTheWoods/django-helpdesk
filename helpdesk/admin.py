@@ -8,7 +8,7 @@ class QueueAdmin(admin.ModelAdmin):
     list_display = ('title', 'slug', 'email_address', 'locale')
 
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ('title', 'status', 'assigned_to', 'submitter_email',)
+    list_display = ('title','queue', 'status', 'assigned_to', 'submitter_email',)
     date_hierarchy = 'created'
     list_filter = ('assigned_to', 'status', )
 
