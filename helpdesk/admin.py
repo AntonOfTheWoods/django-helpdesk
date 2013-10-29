@@ -24,7 +24,7 @@ class FollowUpAdmin(admin.ModelAdmin):
 class KBItemAdmin(admin.ModelAdmin):
     list_display = ('category', 'title', 'last_updated',)
     list_display_links = ('title',)
-   
+
 class CustomFieldAdmin(admin.ModelAdmin):
     list_display = ('name', 'label', 'data_type')
 

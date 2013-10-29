@@ -278,6 +278,7 @@ class Ticket(models.Model):
         )
 
     queue = models.ForeignKey(
+        _('Queue')
         Queue,
         verbose_name=_('Queue'),
         )
