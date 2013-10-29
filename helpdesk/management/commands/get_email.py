@@ -30,6 +30,8 @@ from django.utils.translation import ugettext as _
 from helpdesk import settings
 from django.conf import settings as django_settings
 
+import traceback
+
 
 try:
     from django.utils import timezone
@@ -141,17 +143,25 @@ def process_queue(q, quiet=False):
         server.logout()
 
     elif email_box_type == 'file':
- #       try:
+        try:
             print os.path.normpath(django_settings.MEDIA_ROOT + '/' + q.email_box_file_glob.replace('../',''))
             for message in glob.glob(os.path.normpath(django_settings.MEDIA_ROOT + '/' + q.email_box_file_glob.replace('../',''))):
                 with open (message, "r") as message_file:
-                    message_content=message_file.read()
-                    ticket = ticket_from_message(message=message_content, queue=q, quiet=quiet)
+		    try:
+                        message_content=message_file.read()
+                        ticket = ticket_from_message(message=decodeUnknown(None, message_content), queue=q, quiet=quiet)
+                    except Exception as e:
+                        print e
+                        print traceback.print_exc()
+                        print traceback.print_stack()
+                        os.rename(message, message + ".err")
+                        continue
                 if ticket:
                     os.rename(message, message + ".bak")
-#        except Exception as ex:
-            #pass # do something here
-#            print ex
+        except Exception as ex:
+            print ex
+            print traceback.print_exc()
+            print traceback.print_stack()
             
 def decodeUnknown(charset, string):
     if not charset:
