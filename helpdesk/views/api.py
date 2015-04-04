@@ -13,11 +13,15 @@ through templates/helpdesk/help_api.html.
 
 from django import forms
 from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
+try:
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+except ImportError:
+    from django.contrib.auth.models import User
 from django.http import HttpResponse
 from django.shortcuts import render_to_response
 from django.template import loader, Context
-from django.utils import simplejson
+import simplejson
 from django.views.decorators.csrf import csrf_exempt
 
 try:
@@ -106,7 +110,7 @@ class API:
     def api_public_create_ticket(self):
         form = TicketForm(self.request.POST)
         form.fields['queue'].choices = [[q.id, q.title] for q in Queue.objects.all()]
-        form.fields['assigned_to'].choices = [[u.id, u.username] for u in User.objects.filter(is_active=True)]
+        form.fields['assigned_to'].choices = [[u.id, u.get_username()] for u in User.objects.filter(is_active=True)]
 
         if form.is_valid():
             ticket = form.save(user=self.request.user)

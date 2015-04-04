@@ -17,11 +17,14 @@ import poplib
 import re
 import glob
 import os
+import socket
 
 from datetime import timedelta
 from email.header import decode_header
 from email.Utils import parseaddr, collapse_rfc2231_value
 from optparse import make_option
+
+from email_reply_parser import EmailReplyParser
 
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
@@ -88,6 +91,22 @@ def process_queue(q, quiet=False):
     if not quiet:
         print "Processing: %s" % q
 
+    if q.socks_proxy_type and q.socks_proxy_host and q.socks_proxy_port:
+        try:
+            import socks
+        except ImportError:
+            raise ImportError("Queue has been configured with proxy settings, but no socks library was installed. Try to install PySocks via pypi.")
+
+        proxy_type = {
+            'socks4': socks.SOCKS4,
+            'socks5': socks.SOCKS5,
+        }.get(q.socks_proxy_type)
+
+        socks.set_default_proxy(proxy_type=proxy_type, addr=q.socks_proxy_host, port=q.socks_proxy_port)
+        socket.socket = socks.socksocket
+    else:
+        socket.socket = socket._socketobject
+
     email_box_type = settings.QUEUE_EMAIL_BOX_TYPE if settings.QUEUE_EMAIL_BOX_TYPE else q.email_box_type
 
     if email_box_type == 'pop3':
@@ -137,7 +156,7 @@ def process_queue(q, quiet=False):
                 ticket = ticket_from_message(message=data[0][1], queue=q, quiet=quiet)
                 if ticket:
                     server.store(num, '+FLAGS', '\\Deleted')
-                    
+
         server.expunge()
         server.close()
         server.logout()
@@ -162,7 +181,7 @@ def process_queue(q, quiet=False):
             print ex
             print traceback.print_exc()
             print traceback.print_stack()
-            
+
 def decodeUnknown(charset, string):
     if not charset:
         try:
@@ -218,7 +237,7 @@ def ticket_from_message(message, queue, quiet):
 
         if part.get_content_maintype() == 'text' and name == None:
             if part.get_content_subtype() == 'plain':
-                body_plain = decodeUnknown(part.get_content_charset(), part.get_payload(decode=True))
+                body_plain = EmailReplyParser.parse_reply(decodeUnknown(part.get_content_charset(), part.get_payload(decode=True)))
             else:
                 body_html = part.get_payload(decode=True)
         else:
@@ -293,7 +312,7 @@ def ticket_from_message(message, queue, quiet):
     if t.status == Ticket.REOPENED_STATUS:
         f.new_status = Ticket.REOPENED_STATUS
         f.title = _('Ticket Re-Opened by E-Mail Received from %(sender_email)s' % {'sender_email': sender_email})
-    
+
     f.save()
 
     if not quiet:

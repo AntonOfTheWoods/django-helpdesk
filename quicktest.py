@@ -1,7 +1,10 @@
 import os
 import sys
 import argparse
+
+import django
 from django.conf import settings
+
 
 class QuickDjangoTest(object):
     """
@@ -11,7 +14,7 @@ class QuickDjangoTest(object):
 
         >>> QuickDjangoTest('app1', 'app2')
 
-    Based on a script published by Lukasz Dziedzia at: 
+    Based on a script published by Lukasz Dziedzia at:
     http://stackoverflow.com/questions/3841725/how-to-launch-tests-for-django-reusable-app
     """
     DIRNAME = os.path.dirname(__file__)
@@ -22,7 +25,17 @@ class QuickDjangoTest(object):
         'django.contrib.admin',
         'django.contrib.staticfiles',
         'django.contrib.messages',
+        'django.contrib.humanize',
+        'bootstrapform',
     )
+    MIDDLEWARE_CLASSES = [
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+        'django.contrib.messages.middleware.MessageMiddleware',
+        'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    ]
 
     def __init__(self, *args, **kwargs):
         self.apps = args
@@ -38,8 +51,7 @@ class QuickDjangoTest(object):
         """
         Figure out which version of Django's test suite we have to play with.
         """
-        from django import VERSION
-        if VERSION[0] == 1 and VERSION[1] >= 2:
+        if django.VERSION >= (1, 2):
             return 'new'
         else:
             return 'old'
@@ -62,6 +74,7 @@ class QuickDjangoTest(object):
         """
         Fire up the Django test suite developed for version 1.2
         """
+
         settings.configure(
             DEBUG = True,
             DATABASES = {
@@ -75,8 +88,13 @@ class QuickDjangoTest(object):
                 }
             },
             INSTALLED_APPS = self.INSTALLED_APPS + self.apps,
+            MIDDLEWARE_CLASSES = self.MIDDLEWARE_CLASSES,
             ROOT_URLCONF = self.apps[0] + '.urls',
         )
+
+        if django.VERSION >= (1, 7):
+            django.setup()
+
         from django.test.simple import DjangoTestSuiteRunner
         failures = DjangoTestSuiteRunner().run_tests(self.apps, verbosity=1)
         if failures:

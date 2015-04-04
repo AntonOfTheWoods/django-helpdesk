@@ -11,9 +11,14 @@ from StringIO import StringIO
 
 from django import forms
 from django.forms import extras
+from django.core.files.storage import default_storage
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.utils.translation import ugettext as _
+try:
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+except ImportError:
+    from django.contrib.auth.models import User
 try:
     from django.utils import timezone
 except ImportError:
@@ -21,10 +26,52 @@ except ImportError:
 
 from helpdesk.lib import send_templated_mail, safe_template_context
 from helpdesk.models import Ticket, Queue, FollowUp, Attachment, IgnoreEmail, TicketCC, CustomField, TicketCustomFieldValue, TicketDependency
-from helpdesk.settings import HAS_TAG_SUPPORT
 from helpdesk import settings as helpdesk_settings
 
-class EditTicketForm(forms.ModelForm):
+class CustomFieldMixin(object):
+    """
+    Mixin that provides a method to turn CustomFields into an actual field
+    """
+    def customfield_to_field(self, field, instanceargs):
+        if field.data_type == 'varchar':
+            fieldclass = forms.CharField
+            instanceargs['max_length'] = field.max_length
+        elif field.data_type == 'text':
+            fieldclass = forms.CharField
+            instanceargs['widget'] = forms.Textarea
+            instanceargs['max_length'] = field.max_length
+        elif field.data_type == 'integer':
+            fieldclass = forms.IntegerField
+        elif field.data_type == 'decimal':
+            fieldclass = forms.DecimalField
+            instanceargs['decimal_places'] = field.decimal_places
+            instanceargs['max_digits'] = field.max_length
+        elif field.data_type == 'list':
+            fieldclass = forms.ChoiceField
+            choices = field.choices_as_array
+            if field.empty_selection_list:
+                choices.insert(0, ('','---------' ) )
+            instanceargs['choices'] = choices
+        elif field.data_type == 'boolean':
+            fieldclass = forms.BooleanField
+        elif field.data_type == 'date':
+            fieldclass = forms.DateField
+        elif field.data_type == 'time':
+            fieldclass = forms.TimeField
+        elif field.data_type == 'datetime':
+            fieldclass = forms.DateTimeField
+        elif field.data_type == 'email':
+            fieldclass = forms.EmailField
+        elif field.data_type == 'url':
+            fieldclass = forms.URLField
+        elif field.data_type == 'ipaddress':
+            fieldclass = forms.IPAddressField
+        elif field.data_type == 'slug':
+            fieldclass = forms.SlugField
+
+        self.fields['custom_%s' % field.name] = fieldclass(**instanceargs)
+
+class EditTicketForm(CustomFieldMixin, forms.ModelForm):
     class Meta:
         model = Ticket
         exclude = ('created', 'modified', 'status', 'on_hold', 'resolution', 'last_escalation', 'assigned_to')
@@ -47,50 +94,15 @@ class EditTicketForm(forms.ModelForm):
                     'required': field.required,
                     'initial': initial_value,
                     }
-            if field.data_type == 'varchar':
-                fieldclass = forms.CharField
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'text':
-                fieldclass = forms.CharField
-                instanceargs['widget'] = forms.Textarea
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'integer':
-                fieldclass = forms.IntegerField
-            elif field.data_type == 'decimal':
-                fieldclass = forms.DecimalField
-                instanceargs['decimal_places'] = field.decimal_places
-                instanceargs['max_digits'] = field.max_length
-            elif field.data_type == 'list':
-                fieldclass = forms.ChoiceField
-                choices = field.choices_as_array
-                if field.empty_selection_list:
-                    choices.insert(0, ('','---------' ) )
-                instanceargs['choices'] = choices
-            elif field.data_type == 'boolean':
-                fieldclass = forms.BooleanField
-            elif field.data_type == 'date':
-                fieldclass = forms.DateField
-            elif field.data_type == 'time':
-                fieldclass = forms.TimeField
-            elif field.data_type == 'datetime':
-                fieldclass = forms.DateTimeField
-            elif field.data_type == 'email':
-                fieldclass = forms.EmailField
-            elif field.data_type == 'url':
-                fieldclass = forms.URLField
-            elif field.data_type == 'ipaddress':
-                fieldclass = forms.IPAddressField
-            elif field.data_type == 'slug':
-                fieldclass = forms.SlugField
-            
-            self.fields['custom_%s' % field.name] = fieldclass(**instanceargs)
+
+            self.customfield_to_field(field, instanceargs)
 
 
     def save(self, *args, **kwargs):
         
         for field, value in self.cleaned_data.items():
             if field.startswith('custom_'):
-                field_name = field.replace('custom_', '')
+                field_name = field.replace('custom_', '', 1)
                 customfield = CustomField.objects.get(name=field_name)
                 try:
                     cfv = TicketCustomFieldValue.objects.get(ticket=self.instance, field=customfield)
@@ -111,7 +123,7 @@ class EditFollowUpForm(forms.ModelForm):
         model = FollowUp
         exclude = ('date', 'user',)
 
-class TicketForm(forms.Form):
+class TicketForm(CustomFieldMixin, forms.Form):
     queue = forms.ChoiceField(
         label=_('Queue'),
         required=True,
@@ -175,17 +187,6 @@ class TicketForm(forms.Form):
         help_text=_('You can attach a file such as a document or screenshot to this ticket.'),
         )
 
-    if HAS_TAG_SUPPORT:
-        tags = forms.CharField(
-            max_length=255,
-            required=False,
-            widget=forms.TextInput(),
-            label=_('Tags'),
-            help_text=_('Words, separated by spaces, or phrases separated by commas. '
-                    'These should communicate significant characteristics of this '
-                    'ticket'),
-            )
-
     def __init__(self, *args, **kwargs):
         """
         Add any custom fields that are defined to the form
@@ -197,44 +198,8 @@ class TicketForm(forms.Form):
                     'help_text': field.help_text,
                     'required': field.required,
                     }
-            if field.data_type == 'varchar':
-                fieldclass = forms.CharField
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'text':
-                fieldclass = forms.CharField
-                instanceargs['widget'] = forms.Textarea
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'integer':
-                fieldclass = forms.IntegerField
-            elif field.data_type == 'decimal':
-                fieldclass = forms.DecimalField
-                instanceargs['decimal_places'] = field.decimal_places
-                instanceargs['max_digits'] = field.max_length
-            elif field.data_type == 'list':
-                fieldclass = forms.ChoiceField
-                choices = field.choices_as_array
-                if field.empty_selection_list:
-                    choices.insert(0, ('','---------' ) )
-                instanceargs['choices'] = choices
-            elif field.data_type == 'boolean':
-                fieldclass = forms.BooleanField
-            elif field.data_type == 'date':
-                fieldclass = forms.DateField
-                instanceargs['widget'] = extras.SelectDateWidget
-            elif field.data_type == 'time':
-                fieldclass = forms.TimeField
-            elif field.data_type == 'datetime':
-                fieldclass = forms.DateTimeField
-            elif field.data_type == 'email':
-                fieldclass = forms.EmailField
-            elif field.data_type == 'url':
-                fieldclass = forms.URLField
-            elif field.data_type == 'ipaddress':
-                fieldclass = forms.IPAddressField
-            elif field.data_type == 'slug':
-                fieldclass = forms.SlugField
-            
-            self.fields['custom_%s' % field.name] = fieldclass(**instanceargs)
+
+            self.customfield_to_field(field, instanceargs)
 
 
     def save(self, user):
@@ -254,9 +219,6 @@ class TicketForm(forms.Form):
                     due_date = self.cleaned_data['due_date'],
                   )
 
-        if HAS_TAG_SUPPORT:
-            t.tags = self.cleaned_data['tags']
-
         if self.cleaned_data['assigned_to']:
             try:
                 u = User.objects.get(id=self.cleaned_data['assigned_to'])
@@ -267,7 +229,7 @@ class TicketForm(forms.Form):
         
         for field, value in self.cleaned_data.items():
             if field.startswith('custom_'):
-                field_name = field.replace('custom_', '')
+                field_name = field.replace('custom_', '', 1)
                 customfield = CustomField.objects.get(name=field_name)
                 cfv = TicketCustomFieldValue(ticket=t,
                             field=customfield,
@@ -305,7 +267,10 @@ class TicketForm(forms.Form):
             if file.size < getattr(settings, 'MAX_EMAIL_ATTACHMENT_SIZE', 512000):
                 # Only files smaller than 512kb (or as defined in 
                 # settings.MAX_EMAIL_ATTACHMENT_SIZE) are sent via email.
-                files.append(a.file.path)
+                try:
+                    files.append([a.filename, a.file])
+                except NotImplementedError:
+                    pass
 
         context = safe_template_context(t)
         context['comment'] = f.comment
@@ -358,7 +323,7 @@ class TicketForm(forms.Form):
         return t
 
 
-class PublicTicketForm(forms.Form):
+class PublicTicketForm(CustomFieldMixin, forms.Form):
     queue = forms.ChoiceField(
         label=_('Queue'),
         required=True,
@@ -404,6 +369,7 @@ class PublicTicketForm(forms.Form):
         required=False,
         label=_('Attach File'),
         help_text=_('You can attach a file such as a document or screenshot to this ticket.'),
+        max_length=1000,
         )
 
     def __init__(self, *args, **kwargs):
@@ -417,43 +383,8 @@ class PublicTicketForm(forms.Form):
                     'help_text': field.help_text,
                     'required': field.required,
                     }
-            if field.data_type == 'varchar':
-                fieldclass = forms.CharField
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'text':
-                fieldclass = forms.CharField
-                instanceargs['widget'] = forms.Textarea
-                instanceargs['max_length'] = field.max_length
-            elif field.data_type == 'integer':
-                fieldclass = forms.IntegerField
-            elif field.data_type == 'decimal':
-                fieldclass = forms.DecimalField
-                instanceargs['decimal_places'] = field.decimal_places
-                instanceargs['max_digits'] = field.max_length
-            elif field.data_type == 'list':
-                fieldclass = forms.ChoiceField
-                choices = field.choices_as_array
-                if field.empty_selection_list:
-                    choices.insert(0, ('','---------' ) )
-                instanceargs['choices'] = choices
-            elif field.data_type == 'boolean':
-                fieldclass = forms.BooleanField
-            elif field.data_type == 'date':
-                fieldclass = forms.DateField
-            elif field.data_type == 'time':
-                fieldclass = forms.TimeField
-            elif field.data_type == 'datetime':
-                fieldclass = forms.DateTimeField
-            elif field.data_type == 'email':
-                fieldclass = forms.EmailField
-            elif field.data_type == 'url':
-                fieldclass = forms.URLField
-            elif field.data_type == 'ipaddress':
-                fieldclass = forms.IPAddressField
-            elif field.data_type == 'slug':
-                fieldclass = forms.SlugField
-            
-            self.fields['custom_%s' % field.name] = fieldclass(**instanceargs)
+
+            self.customfield_to_field(field, instanceargs)
 
     def save(self):
         """
@@ -477,7 +408,7 @@ class PublicTicketForm(forms.Form):
 
         for field, value in self.cleaned_data.items():
             if field.startswith('custom_'):
-                field_name = field.replace('custom_', '')
+                field_name = field.replace('custom_', '', 1)
                 customfield = CustomField.objects.get(name=field_name)
                 cfv = TicketCustomFieldValue(ticket=t,
                             field=customfield,
@@ -511,7 +442,7 @@ class PublicTicketForm(forms.Form):
             if file.size < getattr(settings, 'MAX_EMAIL_ATTACHMENT_SIZE', 512000):
                 # Only files smaller than 512kb (or as defined in 
                 # settings.MAX_EMAIL_ATTACHMENT_SIZE) are sent via email.
-                files.append(a.file.path)
+                files.append([a.filename, a.file])
 
         context = safe_template_context(t)
 
@@ -593,14 +524,15 @@ class UserSettingsForm(forms.Form):
 class EmailIgnoreForm(forms.ModelForm):
     class Meta:
         model = IgnoreEmail
+        exclude = []
 
 class TicketCCForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super(TicketCCForm, self).__init__(*args, **kwargs)
         if helpdesk_settings.HELPDESK_STAFF_ONLY_TICKET_CC:
-            users = User.objects.filter(is_active=True, is_staff=True).order_by('username')
+            users = User.objects.filter(is_active=True, is_staff=True).order_by(User.USERNAME_FIELD)
         else:
-            users = User.objects.filter(is_active=True).order_by('username')
+            users = User.objects.filter(is_active=True).order_by(User.USERNAME_FIELD)
         self.fields['user'].queryset = users 
     class Meta:
         model = TicketCC
