@@ -45,13 +45,18 @@ def send_templated_mail(template_name, email_context, recipients, sender=None, b
     fail_silently is passed to Django's mail routine. Set to 'True' to ignore
         any errors at send time.
 
-    files can be a list of tuple. Each tuple should be a filename to attach, 
+    files can be a list of tuple. Each tuple should be a filename to attach,
         along with the File objects to be read. files can be blank.
 
     """
     from django.conf import settings
     from django.core.mail import EmailMultiAlternatives
     from django.template import loader, Context
+    try:  # Django 1.8
+        from django.template import engines
+        template_loader = engines['django'].from_string
+    except ImportError:
+        template_loader = loader.get_template_from_string
 
     from helpdesk.models import EmailTemplate
     from helpdesk.settings import HELPDESK_EMAIL_SUBJECT_TEMPLATE
@@ -77,20 +82,18 @@ def send_templated_mail(template_name, email_context, recipients, sender=None, b
             t = EmailTemplate.objects.get(template_name__iexact=template_name, locale__isnull=True)
         except EmailTemplate.DoesNotExist:
             logger.warning('template "%s" does not exist, no mail sent' %
-			   template_name)
-            return # just ignore if template doesn't exist
+                           template_name)
+            return  # just ignore if template doesn't exist
 
     if not sender:
         sender = settings.DEFAULT_FROM_EMAIL
 
     footer_file = os.path.join('helpdesk', locale, 'email_text_footer.txt')
 
-    text_part = loader.get_template_from_string(
-        "%s{%% include '%s' %%}" % (t.plain_text, footer_file)
-        ).render(context)
+    text_part = template_loader("%s{%% include '%s' %%}" % (
+        t.plain_text, footer_file)).render(context)
 
     email_html_base_file = os.path.join('helpdesk', locale, 'email_html_base.html')
-
 
     ''' keep new lines in html emails '''
     from django.utils.safestring import mark_safe
@@ -100,14 +103,12 @@ def send_templated_mail(template_name, email_context, recipients, sender=None, b
         html_txt = html_txt.replace('\r\n', '<br>')
         context['comment'] = mark_safe(html_txt)
 
-    html_part = loader.get_template_from_string(
+    html_part = template_loader(
         "{%% extends '%s' %%}{%% block title %%}%s{%% endblock %%}{%% block content %%}%s{%% endblock %%}" % (email_html_base_file, t.heading, t.html)
         ).render(context)
 
-    subject_part = loader.get_template_from_string(
-        HELPDESK_EMAIL_SUBJECT_TEMPLATE % {
-            "subject": t.subject,
-        }).render(context)
+    subject_part = template_loader(HELPDESK_EMAIL_SUBJECT_TEMPLATE % {
+        "subject": t.subject, }).render(context)
 
     if isinstance(recipients,(str,unicode)):
         if recipients.find(','):
